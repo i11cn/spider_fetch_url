@@ -13,60 +13,68 @@ import (
     "syscall"
 )
 
-func fetch_url(reqs <-chan *http.Request, resps chan<- *http.Response, wg *sync.WaitGroup) {
-    defer func() {
-        recover()
-        wg.Done()
-    }()
-    client := http.Client{}
-    for req := range reqs {
-        resp, err := client.Do(req)
-        if err == nil {
-            resps<- resp
-        }
-    }
-    close(resps)
+type FetchItem struct {
+    url string
+    req *http.Request
+    resp *http.Response
 }
 
-func gen_request(urls <-chan string, reqs chan<- *http.Request, wg *sync.WaitGroup) {
-    defer func() {
-        recover()
-        wg.Done()
-    }()
-    for url := range urls {
-        req, err := http.NewRequest("GET", url, nil)
-        if err == nil {
-            req.Header.Add("Agent", "Snower Search Enging 0.1")
-            reqs<- req
-        }
-    }
-    close(reqs)
-}
-
-func do_response(resps <-chan *http.Response, wg *sync.WaitGroup) {
-    defer func() {
-        recover()
-        wg.Done()
-    }()
-    for resp := range resps {
-        buff := bytes.NewBuffer(make([]byte, 0))
-        resp.Write(buff)
-        fmt.Println(buff)
-    }
-}
-
-func listen_for_url_list(socket mangos.Socket, urls chan<- string, wg *sync.WaitGroup) {
+func listen_for_url_list(socket mangos.Socket, urls chan<- *FetchItem, wg *sync.WaitGroup) {
     defer func() {
         recover()
         wg.Done()
     }()
     for {
         if url, err := socket.Recv(); err == nil {
-            urls<- string(url)
+            urls<- &FetchItem{url: string(url)}
         } else if err == mangos.ErrClosed {
             close(urls)
             return
         }
+    }
+}
+
+func gen_request(urls <-chan *FetchItem, reqs chan<- *FetchItem, wg *sync.WaitGroup) {
+    defer func() {
+        recover()
+        wg.Done()
+    }()
+    for item := range urls {
+        req, err := http.NewRequest("GET", item.url, nil)
+        if err == nil {
+            req.Header.Add("Agent", "Snower Search Enging 0.1")
+            item.req = req
+            reqs<- item
+        }
+    }
+    close(reqs)
+}
+
+func fetch_url(reqs <-chan *FetchItem, resps chan<- *FetchItem, wg *sync.WaitGroup) {
+    defer func() {
+        recover()
+        wg.Done()
+    }()
+    client := http.Client{}
+    for item := range reqs {
+        resp, err := client.Do(item.req)
+        if err == nil {
+            item.resp = resp
+            resps<- item
+        }
+    }
+    close(resps)
+}
+
+func do_response(resps <-chan *FetchItem, wg *sync.WaitGroup) {
+    defer func() {
+        recover()
+        wg.Done()
+    }()
+    for item := range resps {
+        buff := bytes.NewBuffer(make([]byte, 0))
+        item.resp.Write(buff)
+        fmt.Println(buff)
     }
 }
 
@@ -91,9 +99,9 @@ func create_socket(ep string) (socket mangos.Socket, err error) {
 }
 
 func main() {
-    urls := make(chan string)
-    reqs := make(chan *http.Request)
-    resps := make(chan *http.Response)
+    urls := make(chan *FetchItem)
+    reqs := make(chan *FetchItem)
+    resps := make(chan *FetchItem)
     var wg sync.WaitGroup
 
     socket, err := create_socket("tcp://127.0.0.1:8888")
