@@ -1,5 +1,5 @@
 GO=go
-GOPATH=/home/snower/golang/pkgs
+GOPATH=$(shell pwd)
 GOFLAGS=build
 BIN=fetch
 
